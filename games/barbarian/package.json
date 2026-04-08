@@ -1,0 +1,12 @@
+{
+  "name": "barbarian-arena",
+  "version": "1.0.0",
+  "description": "Conan-style barbarian fighting game",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "dependencies": {
+    "express": "^4.21.0"
+  }
+}
