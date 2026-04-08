@@ -4,6 +4,266 @@ const ctx = canvas.getContext('2d');
 canvas.width = 1024;
 canvas.height = 576;
 
+// ===== AUDIO ENGINE =====
+const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+
+function unlockAudio() {
+    if (audioCtx.state === 'suspended') audioCtx.resume();
+    window.removeEventListener('click', unlockAudio);
+    window.removeEventListener('keydown', unlockAudio);
+}
+window.addEventListener('click', unlockAudio);
+window.addEventListener('keydown', unlockAudio);
+
+const SFX = {
+    // Brutal sword slash — white noise burst with bandpass
+    slash() {
+        const dur = 0.15;
+        const buf = audioCtx.createBuffer(1, audioCtx.sampleRate * dur, audioCtx.sampleRate);
+        const data = buf.getChannelData(0);
+        for (let i = 0; i < data.length; i++) {
+            data[i] = (Math.random() * 2 - 1) * (1 - i / data.length);
+        }
+        const src = audioCtx.createBufferSource();
+        src.buffer = buf;
+        const bp = audioCtx.createBiquadFilter();
+        bp.type = 'bandpass'; bp.frequency.value = 3000; bp.Q.value = 1;
+        const gain = audioCtx.createGain();
+        gain.gain.setValueAtTime(0.6, audioCtx.currentTime);
+        gain.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + dur);
+        src.connect(bp).connect(gain).connect(audioCtx.destination);
+        src.start();
+    },
+
+    // Heavy overhead impact — low thud + crunch
+    overheadHit() {
+        const osc = audioCtx.createOscillator();
+        osc.type = 'sawtooth';
+        osc.frequency.setValueAtTime(120, audioCtx.currentTime);
+        osc.frequency.exponentialRampToValueAtTime(30, audioCtx.currentTime + 0.3);
+        const gain = audioCtx.createGain();
+        gain.gain.setValueAtTime(0.8, audioCtx.currentTime);
+        gain.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + 0.3);
+        // Distortion
+        const dist = audioCtx.createWaveShaper();
+        const curve = new Float32Array(256);
+        for (let i = 0; i < 256; i++) { const x = (i * 2) / 256 - 1; curve[i] = (Math.PI + 10) * x / (Math.PI + 10 * Math.abs(x)); }
+        dist.curve = curve;
+        osc.connect(dist).connect(gain).connect(audioCtx.destination);
+        osc.start(); osc.stop(audioCtx.currentTime + 0.3);
+
+        // Crunch noise
+        const dur = 0.1;
+        const buf = audioCtx.createBuffer(1, audioCtx.sampleRate * dur, audioCtx.sampleRate);
+        const data = buf.getChannelData(0);
+        for (let i = 0; i < data.length; i++) data[i] = (Math.random() * 2 - 1) * (1 - i / data.length);
+        const nSrc = audioCtx.createBufferSource(); nSrc.buffer = buf;
+        const nGain = audioCtx.createGain();
+        nGain.gain.setValueAtTime(0.5, audioCtx.currentTime);
+        nGain.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + dur);
+        nSrc.connect(nGain).connect(audioCtx.destination);
+        nSrc.start();
+    },
+
+    // Flesh impact — meaty thwack
+    fleshHit() {
+        const osc = audioCtx.createOscillator();
+        osc.type = 'sine';
+        osc.frequency.setValueAtTime(200, audioCtx.currentTime);
+        osc.frequency.exponentialRampToValueAtTime(50, audioCtx.currentTime + 0.15);
+        const gain = audioCtx.createGain();
+        gain.gain.setValueAtTime(0.7, audioCtx.currentTime);
+        gain.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + 0.15);
+        osc.connect(gain).connect(audioCtx.destination);
+        osc.start(); osc.stop(audioCtx.currentTime + 0.15);
+        // Wet splat
+        const dur = 0.08;
+        const buf = audioCtx.createBuffer(1, audioCtx.sampleRate * dur, audioCtx.sampleRate);
+        const data = buf.getChannelData(0);
+        for (let i = 0; i < data.length; i++) data[i] = (Math.random() * 2 - 1) * Math.pow(1 - i / data.length, 2);
+        const nSrc = audioCtx.createBufferSource(); nSrc.buffer = buf;
+        const lp = audioCtx.createBiquadFilter(); lp.type = 'lowpass'; lp.frequency.value = 1500;
+        const nGain = audioCtx.createGain(); nGain.gain.value = 0.4;
+        nSrc.connect(lp).connect(nGain).connect(audioCtx.destination);
+        nSrc.start();
+    },
+
+    // Metal clang on block
+    block() {
+        const osc = audioCtx.createOscillator();
+        osc.type = 'square';
+        osc.frequency.setValueAtTime(800, audioCtx.currentTime);
+        osc.frequency.exponentialRampToValueAtTime(200, audioCtx.currentTime + 0.2);
+        const gain = audioCtx.createGain();
+        gain.gain.setValueAtTime(0.4, audioCtx.currentTime);
+        gain.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + 0.2);
+        osc.connect(gain).connect(audioCtx.destination);
+        osc.start(); osc.stop(audioCtx.currentTime + 0.2);
+        // Ring
+        const osc2 = audioCtx.createOscillator();
+        osc2.type = 'sine'; osc2.frequency.value = 2200;
+        const g2 = audioCtx.createGain();
+        g2.gain.setValueAtTime(0.15, audioCtx.currentTime);
+        g2.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + 0.4);
+        osc2.connect(g2).connect(audioCtx.destination);
+        osc2.start(); osc2.stop(audioCtx.currentTime + 0.4);
+    },
+
+    // SPECIAL attack — screaming sword whoosh
+    specialSwing() {
+        const dur = 0.4;
+        const buf = audioCtx.createBuffer(1, audioCtx.sampleRate * dur, audioCtx.sampleRate);
+        const data = buf.getChannelData(0);
+        for (let i = 0; i < data.length; i++) {
+            const t = i / audioCtx.sampleRate;
+            data[i] = Math.sin(t * 800 + Math.sin(t * 30) * 10) * (1 - t / dur) * 0.5
+                     + (Math.random() * 2 - 1) * 0.3 * (1 - t / dur);
+        }
+        const src = audioCtx.createBufferSource(); src.buffer = buf;
+        const gain = audioCtx.createGain(); gain.gain.value = 0.7;
+        src.connect(gain).connect(audioCtx.destination);
+        src.start();
+    },
+
+    // DECAPITATION — massive gore explosion
+    decapitate() {
+        // Deep bass boom
+        const osc = audioCtx.createOscillator();
+        osc.type = 'sawtooth';
+        osc.frequency.setValueAtTime(80, audioCtx.currentTime);
+        osc.frequency.exponentialRampToValueAtTime(15, audioCtx.currentTime + 0.6);
+        const dist = audioCtx.createWaveShaper();
+        const curve = new Float32Array(256);
+        for (let i = 0; i < 256; i++) { const x = (i * 2) / 256 - 1; curve[i] = Math.tanh(x * 5); }
+        dist.curve = curve;
+        const gain = audioCtx.createGain();
+        gain.gain.setValueAtTime(1.0, audioCtx.currentTime);
+        gain.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + 0.6);
+        osc.connect(dist).connect(gain).connect(audioCtx.destination);
+        osc.start(); osc.stop(audioCtx.currentTime + 0.6);
+
+        // Wet ripping noise
+        const dur = 0.5;
+        const buf = audioCtx.createBuffer(1, audioCtx.sampleRate * dur, audioCtx.sampleRate);
+        const data = buf.getChannelData(0);
+        for (let i = 0; i < data.length; i++) {
+            const t = i / data.length;
+            data[i] = (Math.random() * 2 - 1) * (1 - t) * Math.sin(t * 50);
+        }
+        const nSrc = audioCtx.createBufferSource(); nSrc.buffer = buf;
+        const lp = audioCtx.createBiquadFilter(); lp.type = 'lowpass'; lp.frequency.value = 2000;
+        const nGain = audioCtx.createGain(); nGain.gain.value = 0.8;
+        nSrc.connect(lp).connect(nGain).connect(audioCtx.destination);
+        nSrc.start();
+
+        // Blood splatter noise burst
+        setTimeout(() => {
+            const dur2 = 0.3;
+            const buf2 = audioCtx.createBuffer(1, audioCtx.sampleRate * dur2, audioCtx.sampleRate);
+            const d2 = buf2.getChannelData(0);
+            for (let i = 0; i < d2.length; i++) d2[i] = (Math.random() * 2 - 1) * Math.pow(1 - i / d2.length, 3);
+            const s2 = audioCtx.createBufferSource(); s2.buffer = buf2;
+            const lp2 = audioCtx.createBiquadFilter(); lp2.type = 'lowpass'; lp2.frequency.value = 800;
+            const g2 = audioCtx.createGain(); g2.gain.value = 0.6;
+            s2.connect(lp2).connect(g2).connect(audioCtx.destination);
+            s2.start();
+        }, 100);
+    },
+
+    // Head bouncing on ground
+    headBounce() {
+        const osc = audioCtx.createOscillator();
+        osc.type = 'sine';
+        osc.frequency.setValueAtTime(150, audioCtx.currentTime);
+        osc.frequency.exponentialRampToValueAtTime(60, audioCtx.currentTime + 0.1);
+        const gain = audioCtx.createGain();
+        gain.gain.setValueAtTime(0.5, audioCtx.currentTime);
+        gain.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + 0.1);
+        osc.connect(gain).connect(audioCtx.destination);
+        osc.start(); osc.stop(audioCtx.currentTime + 0.1);
+    },
+
+    // Death scream
+    deathScream() {
+        const dur = 0.8;
+        const buf = audioCtx.createBuffer(1, audioCtx.sampleRate * dur, audioCtx.sampleRate);
+        const data = buf.getChannelData(0);
+        for (let i = 0; i < data.length; i++) {
+            const t = i / audioCtx.sampleRate;
+            const env = Math.pow(1 - t / dur, 0.5);
+            data[i] = (Math.sin(t * 600 + Math.sin(t * 7) * 200) * 0.4
+                      + Math.sin(t * 300 + Math.sin(t * 5) * 100) * 0.3
+                      + (Math.random() * 2 - 1) * 0.2) * env;
+        }
+        const src = audioCtx.createBufferSource(); src.buffer = buf;
+        const gain = audioCtx.createGain(); gain.gain.value = 0.6;
+        src.connect(gain).connect(audioCtx.destination);
+        src.start();
+    },
+
+    // War drum — round start
+    warDrum() {
+        for (let i = 0; i < 3; i++) {
+            setTimeout(() => {
+                const osc = audioCtx.createOscillator();
+                osc.type = 'sine';
+                osc.frequency.setValueAtTime(80, audioCtx.currentTime);
+                osc.frequency.exponentialRampToValueAtTime(40, audioCtx.currentTime + 0.3);
+                const gain = audioCtx.createGain();
+                gain.gain.setValueAtTime(0.6, audioCtx.currentTime);
+                gain.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + 0.3);
+                osc.connect(gain).connect(audioCtx.destination);
+                osc.start(); osc.stop(audioCtx.currentTime + 0.3);
+            }, i * 250);
+        }
+    },
+
+    // Crowd roar on fatality
+    crowdRoar() {
+        const dur = 2.0;
+        const buf = audioCtx.createBuffer(1, audioCtx.sampleRate * dur, audioCtx.sampleRate);
+        const data = buf.getChannelData(0);
+        for (let i = 0; i < data.length; i++) {
+            const t = i / data.length;
+            const env = t < 0.1 ? t / 0.1 : (1 - (t - 0.1) / 0.9);
+            data[i] = (Math.random() * 2 - 1) * env * 0.3
+                     + Math.sin(i * 0.01 + Math.sin(i * 0.001) * 5) * env * 0.15;
+        }
+        const src = audioCtx.createBufferSource(); src.buffer = buf;
+        const lp = audioCtx.createBiquadFilter(); lp.type = 'lowpass'; lp.frequency.value = 1200;
+        const gain = audioCtx.createGain(); gain.gain.value = 0.5;
+        src.connect(lp).connect(gain).connect(audioCtx.destination);
+        src.start();
+    },
+
+    // Footstep
+    step() {
+        const osc = audioCtx.createOscillator();
+        osc.type = 'sine';
+        osc.frequency.value = 60;
+        const gain = audioCtx.createGain();
+        gain.gain.setValueAtTime(0.1, audioCtx.currentTime);
+        gain.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + 0.05);
+        osc.connect(gain).connect(audioCtx.destination);
+        osc.start(); osc.stop(audioCtx.currentTime + 0.05);
+    },
+
+    // Victory gong
+    victoryGong() {
+        [200, 300, 400].forEach((freq, i) => {
+            setTimeout(() => {
+                const osc = audioCtx.createOscillator();
+                osc.type = 'sine'; osc.frequency.value = freq;
+                const gain = audioCtx.createGain();
+                gain.gain.setValueAtTime(0.3, audioCtx.currentTime);
+                gain.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + 1.5);
+                osc.connect(gain).connect(audioCtx.destination);
+                osc.start(); osc.stop(audioCtx.currentTime + 1.5);
+            }, i * 200);
+        });
+    }
+};
+
 // ===== CONSTANTS =====
 const GROUND_Y = 460;
 const GRAVITY = 0.6;
@@ -117,6 +377,10 @@ class Fighter {
         this.attackType = type;
         this.attackFrame = 0;
         this.attackHit = false;
+
+        // Sound
+        if (type === 'special') SFX.specialSwing();
+        else SFX.slash();
     }
 
     takeDamage(amount, attackerX) {
@@ -124,9 +388,11 @@ class Fighter {
             amount *= (1 - BLOCK_DAMAGE_REDUCTION);
             this.stamina -= 15;
             spawnSparks(this.facing === 1 ? this.x : this.x + this.width, this.y + 30, 5);
+            SFX.block();
         } else {
             spawnBlood(this.centerX, this.y + 20, 8);
             screenShake = 6;
+            if (amount >= 18) SFX.overheadHit(); else SFX.fleshHit();
         }
         this.health -= amount;
         this.isHurt = true;
@@ -136,6 +402,7 @@ class Fighter {
         if (this.health <= 0) {
             this.health = 0;
             this.isDead = true;
+            SFX.deathScream();
         }
     }
 
@@ -192,7 +459,10 @@ class Fighter {
 
         // Animation
         this.animTimer++;
-        if (this.animTimer % 8 === 0) this.animFrame = (this.animFrame + 1) % 4;
+        if (this.animTimer % 8 === 0) {
+            this.animFrame = (this.animFrame + 1) % 4;
+            if (Math.abs(this.vx) > 2 && !this.isJumping && this.animFrame % 2 === 0) SFX.step();
+        }
     }
 
     draw() {
@@ -449,6 +719,7 @@ function updateHead() {
             headObj.landed = true;
             headObj.vx = 0;
             spawnBlood(headObj.x, headObj.y, 10);
+            SFX.headBounce();
         }
     }
 }
@@ -576,10 +847,13 @@ function onFighterDeath(winner, loser) {
     if (winner.wins >= ROUND_WIN_SCORE || winner.attackType === 'special') {
         loser.isDecapitated = true;
         spawnHead(loser);
+        SFX.decapitate();
+        setTimeout(() => SFX.crowdRoar(), 500);
         gameState = 'fatality';
         setTimeout(() => {
             if (winner.wins >= ROUND_WIN_SCORE) {
                 gameState = 'gameOver';
+                SFX.victoryGong();
             } else {
                 gameState = 'roundEnd';
             }
@@ -597,6 +871,7 @@ function startRound() {
     bloodParticles = [];
     sparks = [];
     headObj = null;
+    SFX.warDrum();
 
     player1.x = 150; player1.y = GROUND_Y; player1.health = 100; player1.stamina = 100;
     player1.isDead = false; player1.isDecapitated = false; player1.isAttacking = false;
