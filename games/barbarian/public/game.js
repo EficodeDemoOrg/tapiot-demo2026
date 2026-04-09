@@ -280,6 +280,24 @@ let screenShake = 0;
 let bloodParticles = [];
 let sparks = [];
 let headObj = null; // for decapitation
+let limbObjs = []; // dismembered arms
+
+// Hitlag (impact freeze)
+let hitlagFrames = 0;
+
+// Slow-motion kill cam
+let slowMoFrames = 0;
+let slowMoFactor = 1; // 1 = normal, 0.2 = slow
+
+// Combo tracking per fighter
+let comboCount = { p1: 0, p2: 0 };
+let comboTimer = { p1: 0, p2: 0 };
+const COMBO_WINDOW = 90; // frames
+
+// Persistent gore (survives across rounds)
+let bloodPools = [];
+let wallSplatters = [];
+let persistentGore = []; // body parts from previous rounds
 
 // ===== COLORS =====
 const COLORS = {
@@ -330,6 +348,7 @@ class Fighter {
         this.hurtTimer = 0;
         this.isDead = false;
         this.isDecapitated = false;
+        this.bleeding = false;
 
         // Animation
         this.animFrame = 0;
@@ -392,22 +411,50 @@ class Fighter {
         } else {
             spawnBlood(this.centerX, this.y + 20, 8);
             screenShake = 6;
+            // Hitlag — freeze frames on impact
+            hitlagFrames = amount >= 25 ? 6 : (amount >= 18 ? 4 : 2);
+            // Stagger — heavier knockback on big hits
+            const staggerMultiplier = amount >= 25 ? 2.5 : (amount >= 18 ? 1.8 : 1);
+            this.vx = (attackerX < this.x ? 4 : -4) * staggerMultiplier;
+            this.hurtTimer = amount >= 18 ? 18 : 10;
+            // Wall splatter if near edge
+            if (this.x < 80 || this.x > canvas.width - 80) {
+                spawnWallSplatter(this.x, this.y + 20, 4);
+            }
             if (amount >= 18) SFX.overheadHit(); else SFX.fleshHit();
         }
         this.health -= amount;
         this.isHurt = true;
-        this.hurtTimer = 10;
-        this.vx = attackerX < this.x ? 4 : -4;
+        if (!this.isBlocking) {
+            // Blood trail flag when low health
+            this.bleeding = this.health < 30 && this.health > 0;
+        }
 
         if (this.health <= 0) {
             this.health = 0;
             this.isDead = true;
             SFX.deathScream();
+            // Slow-mo kill cam
+            slowMoFrames = 45;
+            slowMoFactor = 0.2;
         }
     }
 
     update(keys) {
         if (this.isDead || this.isDecapitated) return;
+
+        // Blood trail when low health
+        if (this.bleeding && Math.abs(this.vx) > 1 && Math.random() < 0.3) {
+            bloodParticles.push({
+                x: this.centerX + (Math.random() - 0.5) * 10,
+                y: this.y + this.height - 5,
+                vx: 0, vy: 0.5,
+                size: Math.random() * 2 + 1,
+                life: 40,
+                color: COLORS.blood,
+                pooled: false
+            });
+        }
 
         // Stamina regen
         if (!this.isAttacking && !this.isBlocking) {
@@ -640,9 +687,43 @@ function spawnBlood(x, y, count) {
             vy: -Math.random() * 6 - 2,
             size: Math.random() * 4 + 2,
             life: 60 + Math.random() * 30,
-            color: Math.random() > 0.5 ? COLORS.blood : COLORS.bloodBright
+            color: Math.random() > 0.5 ? COLORS.blood : COLORS.bloodBright,
+            pooled: false
         });
     }
+}
+
+// Wall blood splatter
+function spawnWallSplatter(x, y, count) {
+    const wallX = x < 100 ? 0 : (x > canvas.width - 100 ? canvas.width : null);
+    if (wallX === null) return;
+    for (let i = 0; i < count; i++) {
+        wallSplatters.push({
+            x: wallX,
+            y: y + (Math.random() - 0.5) * 60,
+            size: Math.random() * 8 + 3,
+            dripY: 0,
+            dripSpeed: Math.random() * 0.3 + 0.1,
+            color: Math.random() > 0.5 ? COLORS.blood : COLORS.bloodBright,
+            alpha: 0.8
+        });
+    }
+}
+
+// Spawn dismembered arm
+function spawnLimb(fighter) {
+    limbObjs.push({
+        x: fighter.centerX + fighter.facing * 15,
+        y: fighter.y + 24,
+        vx: fighter.facing * -2 + (Math.random() - 0.5) * 5,
+        vy: -6 - Math.random() * 4,
+        rotation: 0,
+        rotSpeed: (Math.random() - 0.5) * 0.4,
+        color: fighter.color,
+        landed: false,
+        length: 24
+    });
+    spawnBlood(fighter.centerX + fighter.facing * 15, fighter.y + 24, 15);
 }
 
 function spawnSparks(x, y, count) {
@@ -663,8 +744,28 @@ function updateParticles() {
         p.y += p.vy;
         p.vy += 0.3;
         p.life--;
-        // Leave blood stains on ground
-        if (p.y >= GROUND_Y + 80) { p.vy = 0; p.vx = 0; }
+        // Create blood pools on ground
+        if (p.y >= GROUND_Y + 80 && !p.pooled) {
+            p.vy = 0; p.vx = 0;
+            p.pooled = true;
+            bloodPools.push({
+                x: p.x, y: GROUND_Y + 82,
+                radius: Math.random() * 3 + 2,
+                maxRadius: Math.random() * 12 + 5,
+                color: p.color,
+                alpha: 0.7
+            });
+        }
+        // Wall splatter
+        if ((p.x <= 2 || p.x >= canvas.width - 2) && p.life > 10) {
+            wallSplatters.push({
+                x: p.x <= 2 ? 0 : canvas.width,
+                y: p.y, size: p.size + 2,
+                dripY: 0, dripSpeed: Math.random() * 0.3 + 0.1,
+                color: p.color, alpha: 0.7
+            });
+            p.life = 0;
+        }
         return p.life > 0;
     });
     sparks = sparks.filter(p => {
@@ -674,9 +775,59 @@ function updateParticles() {
         p.life--;
         return p.life > 0;
     });
+    // Expand blood pools
+    bloodPools.forEach(pool => {
+        if (pool.radius < pool.maxRadius) pool.radius += 0.05;
+    });
+    // Wall drips
+    wallSplatters.forEach(s => {
+        if (s.dripY < 40) s.dripY += s.dripSpeed;
+        s.alpha = Math.max(0.3, s.alpha - 0.0005);
+    });
+    // Limb physics
+    limbObjs.forEach(limb => {
+        if (!limb.landed) {
+            limb.x += limb.vx;
+            limb.y += limb.vy;
+            limb.vy += GRAVITY;
+            limb.rotation += limb.rotSpeed;
+            if (limb.y >= GROUND_Y + 70) {
+                limb.y = GROUND_Y + 70;
+                limb.landed = true;
+                limb.vx = 0;
+                spawnBlood(limb.x, limb.y, 5);
+            }
+        }
+    });
+    // Combo timers decay
+    if (comboTimer.p1 > 0) { comboTimer.p1--; if (comboTimer.p1 <= 0) comboCount.p1 = 0; }
+    if (comboTimer.p2 > 0) { comboTimer.p2--; if (comboTimer.p2 <= 0) comboCount.p2 = 0; }
 }
 
 function drawParticles() {
+    // Blood pools on ground (persistent)
+    bloodPools.forEach(pool => {
+        ctx.globalAlpha = pool.alpha;
+        ctx.fillStyle = pool.color;
+        ctx.beginPath();
+        ctx.ellipse(pool.x, pool.y, pool.radius, pool.radius * 0.4, 0, 0, Math.PI * 2);
+        ctx.fill();
+    });
+    ctx.globalAlpha = 1;
+
+    // Wall splatters
+    wallSplatters.forEach(s => {
+        ctx.globalAlpha = s.alpha;
+        ctx.fillStyle = s.color;
+        ctx.beginPath();
+        ctx.arc(s.x, s.y, s.size, 0, Math.PI * 2);
+        ctx.fill();
+        // Drip
+        ctx.fillRect(s.x - 1, s.y, 2, s.dripY);
+    });
+    ctx.globalAlpha = 1;
+
+    // Blood particles
     bloodParticles.forEach(p => {
         ctx.globalAlpha = p.life / 60;
         ctx.fillStyle = p.color;
@@ -688,6 +839,38 @@ function drawParticles() {
         ctx.globalAlpha = p.life / 20;
         ctx.fillStyle = '#FFD700';
         ctx.fillRect(p.x, p.y, p.size, p.size);
+    });
+    ctx.globalAlpha = 1;
+
+    // Dismembered limbs
+    limbObjs.forEach(limb => {
+        ctx.save();
+        ctx.translate(limb.x, limb.y);
+        ctx.rotate(limb.rotation);
+        ctx.fillStyle = limb.color.skin;
+        ctx.fillRect(-4, 0, 8, limb.length);
+        // Blood at stump
+        ctx.fillStyle = COLORS.blood;
+        ctx.beginPath();
+        ctx.arc(0, 0, 5, 0, Math.PI * 2);
+        ctx.fill();
+        // Hand
+        ctx.fillStyle = limb.color.skin;
+        ctx.beginPath();
+        ctx.arc(0, limb.length, 4, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.restore();
+    });
+
+    // Persistent gore from previous rounds
+    persistentGore.forEach(g => {
+        if (g.type === 'pool') {
+            ctx.globalAlpha = 0.4;
+            ctx.fillStyle = g.color;
+            ctx.beginPath();
+            ctx.ellipse(g.x, g.y, g.radius, g.radius * 0.4, 0, 0, Math.PI * 2);
+            ctx.fill();
+        }
     });
     ctx.globalAlpha = 1;
 }
@@ -824,6 +1007,14 @@ function checkAttack(attacker, defender) {
         else if (attacker.attackType === 'overhead') damage = 18;
         else damage = 30; // special
 
+        // Combo tracking & gore scaling
+        const comboKey = attacker === player1 ? 'p1' : 'p2';
+        comboCount[comboKey]++;
+        comboTimer[comboKey] = COMBO_WINDOW;
+        const goreMultiplier = Math.min(comboCount[comboKey], 5);
+        spawnBlood(defender.centerX, defender.y + 20, 3 * goreMultiplier);
+        screenShake = Math.min(6 + comboCount[comboKey] * 2, 20);
+
         // Check if defender is blocking
         if (attacker === player1) {
             defender.isBlocking = isP2Blocking();
@@ -843,11 +1034,30 @@ function onFighterDeath(winner, loser) {
     spawnBlood(loser.centerX, loser.y + 20, 20);
     screenShake = 15;
 
-    // Fatality: decapitation on final round win or special kill
-    if (winner.wins >= ROUND_WIN_SCORE || winner.attackType === 'special') {
-        loser.isDecapitated = true;
-        spawnHead(loser);
-        SFX.decapitate();
+    // Fatality variations based on kill type
+    const killType = winner.attackType;
+    if (winner.wins >= ROUND_WIN_SCORE || killType === 'special' || killType === 'overhead') {
+        if (killType === 'overhead') {
+            // OVERHEAD KILL: dismember arm + decapitate
+            loser.isDecapitated = true;
+            spawnHead(loser);
+            spawnLimb(loser);
+            SFX.decapitate();
+            spawnBlood(loser.centerX, loser.y + 30, 30);
+        } else if (killType === 'slash') {
+            // SLASH KILL: disembowel — extra blood fountain
+            loser.isDecapitated = true;
+            spawnHead(loser);
+            SFX.decapitate();
+            for (let i = 0; i < 3; i++) {
+                setTimeout(() => spawnBlood(loser.centerX, loser.y + 40, 15), i * 100);
+            }
+        } else {
+            // SPECIAL KILL: classic decapitation
+            loser.isDecapitated = true;
+            spawnHead(loser);
+            SFX.decapitate();
+        }
         setTimeout(() => SFX.crowdRoar(), 500);
         gameState = 'fatality';
         setTimeout(() => {
@@ -868,9 +1078,21 @@ function onFighterDeath(winner, loser) {
 function startRound() {
     gameState = 'fighting';
     roundTimer = 60;
+    // Persist blood pools and wall splatters across rounds
+    bloodPools.forEach(pool => {
+        persistentGore.push({ type: 'pool', x: pool.x, y: pool.y, radius: pool.radius, color: pool.color });
+    });
     bloodParticles = [];
     sparks = [];
     headObj = null;
+    limbObjs = [];
+    bloodPools = [];
+    // Keep wall splatters — they stay forever
+    comboCount = { p1: 0, p2: 0 };
+    comboTimer = { p1: 0, p2: 0 };
+    hitlagFrames = 0;
+    slowMoFrames = 0;
+    slowMoFactor = 1;
     SFX.warDrum();
 
     player1.x = 150; player1.y = GROUND_Y; player1.health = 100; player1.stamina = 100;
@@ -905,6 +1127,12 @@ function resetGame() {
     bloodParticles = [];
     sparks = [];
     headObj = null;
+    limbObjs = [];
+    bloodPools = [];
+    wallSplatters = [];
+    persistentGore = [];
+    comboCount = { p1: 0, p2: 0 };
+    comboTimer = { p1: 0, p2: 0 };
     gameState = 'title';
 }
 
@@ -1126,6 +1354,18 @@ function drawGameOver() {
 
 // ===== GAME LOOP =====
 function update() {
+    // Hitlag freeze
+    if (hitlagFrames > 0) {
+        hitlagFrames--;
+        return;
+    }
+
+    // Slow-motion kill cam
+    if (slowMoFrames > 0) {
+        slowMoFrames--;
+        if (slowMoFrames <= 0) slowMoFactor = 1;
+    }
+
     if (gameState === 'fighting') {
         // Handle P2 alt block
         player2.isBlocking = isP2Blocking() && player2.stamina > 0;
@@ -1186,10 +1426,23 @@ function draw() {
     ctx.restore();
 }
 
-function gameLoop() {
-    update();
-    draw();
+let lastTime = 0;
+const FRAME_TIME = 1000 / 60;
+
+function gameLoop(timestamp) {
+    const delta = timestamp - lastTime;
+    const effectiveFrameTime = FRAME_TIME / slowMoFactor;
+    if (delta >= effectiveFrameTime || slowMoFactor >= 1) {
+        lastTime = timestamp;
+        update();
+        draw();
+        // Slow-mo tint overlay
+        if (slowMoFactor < 1) {
+            ctx.fillStyle = 'rgba(139, 0, 0, 0.1)';
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+        }
+    }
     requestAnimationFrame(gameLoop);
 }
 
-gameLoop();
+gameLoop(0);
