@@ -1,0 +1,49 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  lint-and-validate:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install dependencies
+        working-directory: games/barbarian
+        run: npm install
+
+      - name: Check for security vulnerabilities
+        working-directory: games/barbarian
+        run: npm audit --audit-level=high || true
+
+      - name: Validate server starts
+        working-directory: games/barbarian
+        run: |
+          node -e "require('./server.js')" &
+          SERVER_PID=$!
+          sleep 3
+          curl -f http://127.0.0.1:3005/ || (kill $SERVER_PID && exit 1)
+          kill $SERVER_PID
+
+      - name: Check required compliance files exist
+        run: |
+          echo "Checking compliance files..."
+          test -f LICENSE && echo "✅ LICENSE found" || (echo "❌ LICENSE missing" && exit 1)
+          test -f SECURITY.md && echo "✅ SECURITY.md found" || (echo "❌ SECURITY.md missing" && exit 1)
+          test -f CONTRIBUTING.md && echo "✅ CONTRIBUTING.md found" || (echo "❌ CONTRIBUTING.md missing" && exit 1)
+          test -f PRIVACY.md && echo "✅ PRIVACY.md found" || (echo "❌ PRIVACY.md missing" && exit 1)
+          test -f .github/CODEOWNERS && echo "✅ CODEOWNERS found" || (echo "❌ CODEOWNERS missing" && exit 1)
+          echo "All compliance files present ✅"
