@@ -42,3 +42,19 @@ npm start
 - Node.js + Express (static server)
 - HTML5 Canvas (rendering)
 - Web Audio API (all sounds synthesized in real-time)
+
+## Privacy
+
+This application does not collect, store, or transmit any personal data. All game logic runs locally in the browser. See [PRIVACY.md](PRIVACY.md) for details.
+
+## Security
+
+To report a security vulnerability, please see [SECURITY.md](SECURITY.md).
+
+## Contributing
+
+See [CONTRIBUTING.md](CONTRIBUTING.md) for contribution guidelines.
+
+## License
+
+This project is licensed under the MIT License. See [LICENSE](LICENSE) for details.

@@ -1,0 +1,14 @@
+# Code Owners for tapiot-demo2026
+# These owners will be automatically requested for review on PRs.
+
+# Default owners for everything in the repo
+* @EficodeDemoOrg/maintainers
+
+# Game code
+/games/ @EficodeDemoOrg/maintainers
+
+# CI/CD and GitHub configuration
+/.github/ @EficodeDemoOrg/maintainers
+
+# Documentation and compliance
+/*.md @EficodeDemoOrg/maintainers

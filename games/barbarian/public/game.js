@@ -1,3 +1,6 @@
+// Copyright (c) 2026 EficodeDemoOrg. Licensed under the MIT License.
+// See LICENSE file in the project root for full license information.
+
 // ===== BARBARIAN ARENA — Canvas Fighting Game =====
 const canvas = document.getElementById('arena');
 const ctx = canvas.getContext('2d');
